@@ -1,2 +1,1 @@
-# MUNO_saves
-Training neural operators on multi-physics problems to acheive better generalization and faster fine-tuning on similar, yet distinct problems.
+Repository for various experiments on neural operators and neural operator - based foundational models.
