@@ -48,7 +48,7 @@ class ParamContainerMeta(type):
 
 class ParameterLoading(metaclass=ParamContainerMeta):
     '''
-    Loading of default parameters.
+    Loading of default parameters. 
     Inspired by https://github.com/aimclub/FEDOT/blob/master/fedot/core/repository/default_params_repository.py
     '''
 
@@ -89,17 +89,17 @@ class ParameterLoading(metaclass=ParamContainerMeta):
 
 class LpLoss(object):
     """
-    LpLoss provides the L-p norm between two
-    discretized d-dimensional functions. Note that
+    LpLoss provides the L-p norm between two 
+    discretized d-dimensional functions. Note that 
     LpLoss always averages over the spatial dimensions.
 
-    .. note ::
+    .. note :: 
         In function space, the Lp norm is an integral over the
         entire domain. To ensure the norm converges to the integral,
         we scale the matrix norm by quadrature weights along each spatial dimension.
 
-        If no quadrature is passed at a call to LpLoss, we assume a regular
-        discretization and take ``1 / measure`` as the quadrature weights.
+        If no quadrature is passed at a call to LpLoss, we assume a regular 
+        discretization and take ``1 / measure`` as the quadrature weights. 
 
     Parameters
     ----------
@@ -115,14 +115,14 @@ class LpLoss(object):
         .. note::
 
         To perform quadrature, ``LpLoss`` scales ``measure`` by the size
-        of each spatial dimension of ``x``, and multiplies them with
+        of each spatial dimension of ``x``, and multiplies them with 
         ||x-y||, such that the final norm is a scaled average over the spatial
-        dimensions of ``x``.
+        dimensions of ``x``. 
     reduction : str, optional
         whether to reduce across the batch and channel dimensions
         by summing ('sum') or averaging ('mean')
 
-        .. warning::
+        .. warning:: 
 
             ``LpLoss`` always reduces over the spatial dimensions according to ``self.measure``.
             `reduction` only applies to the batch and channel dimensions.
@@ -159,8 +159,8 @@ class LpLoss(object):
     def uniform_quadrature(self, x):
         """
         uniform_quadrature creates quadrature weights
-        scaled by the spatial size of ``x`` to ensure that
-        ``LpLoss`` computes the average over spatial dims.
+        scaled by the spatial size of ``x`` to ensure that 
+        ``LpLoss`` computes the average over spatial dims. 
 
         Parameters
         ----------

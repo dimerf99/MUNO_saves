@@ -1,4 +1,4 @@
-from neuralop.data.datasets.multiphysics_wrapper import load_data
+from muno.data.data.datasets.multiphysics_wrapper import load_data
 from neuralop.training import setup
 from neuralop.utils import get_project_root
 

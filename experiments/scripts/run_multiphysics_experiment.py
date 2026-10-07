@@ -6,45 +6,35 @@ from pathlib import Path
 import sys
 import os
 
-# import socket
-
-# def findFreePort():
-#     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-#         s.bind(('', 0))
-#         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-#         return s.getsockname()[1]
-
-# os.environ['MASTER_ADDR'] = 'localhost'
-# os.environ['MASTER_PORT'] = str(findFreePort())
-# print(f'USING MASTER PORT {os.environ["MASTER_PORT"]}')
-
 import torch
-from torch.utils.data import DataLoader
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJECT_ROOT))
 
+from muno.models.muno import Muno
 from muno.utils.seed import set_global_seed
 from muno.data.benchmarks.config_io import load_yaml_config
 from muno.data.benchmarks.multiphysics_loaders import (
     build_multitask_loaders,
     get_loaders_channels,
-    build_multitask_datasets
 )
-
-from muno.data.benchmarks.datasets import MultiPhysicsDataset
 from muno.data.benchmarks.normalization import build_data_processors
 from muno.data.benchmarks.inspections import inspect_tasks
 from muno.utils.custom_trainer import Trainer
 from muno.utils.training_utils import BalancedRelL2Loss
-from muno.utils.model_factory import build_model
+from muno.utils.model_factory import (
+    build_model,
+    load_from_dir,
+)
 from muno.data.benchmarks.evaluation import (
     evaluate_multitask_loaders,
     save_metrics,
 )
+from muno.utils.finetuning_utils import (
+    load_finetune_checkpoint,
+    load_inference_checkpoint
+)
 
-from muno.models.muno import Muno
 
 def resolve_path(path):
     path = Path(path)
@@ -85,7 +75,8 @@ def save_data_processors(data_processors, output_dir):
                 out_normalizer = copy.deepcopy(processor.out_normalizer).cpu()
                 out_normalizer.to_file(str(normalizer_dir / f"output_normalizer_{idx}.pkl"))
     else:
-        print(f'data_processors: {data_processors}, in: {data_processors.in_normalizer}, out {data_processors.out_normalizer}')
+        print(
+            f'data_processors: {data_processors}, in: {data_processors.in_normalizer}, out {data_processors.out_normalizer}')
         in_normalizer = copy.deepcopy(data_processors.in_normalizer)
         in_normalizer.to('cpu')
         out_normalizer = copy.deepcopy(data_processors.out_normalizer)
@@ -145,10 +136,6 @@ def parse_args():
     parser.add_argument("--output-root", default=None)
     return parser.parse_args()
 
-def loadData(task_configs): # , seed = None
-    # TODO: add processor for download = False
-    train_set, val_set, test_set, task_metadata = build_multitask_datasets(task_configs) # , seed = seed
-    return train_set, val_set, test_set, task_metadata
 
 def main():
     args = parse_args()
@@ -168,10 +155,16 @@ def main():
     training_config = config.get("training", {})
     model_config = config.get("model", {})
 
+    run_mode = config.get("mode", "pretrain")
+    if run_mode not in {"pretrain", "finetune", "eval"}:
+        raise ValueError(
+            f"Unknown run mode '{run_mode}'. Expected one of: pretrain, finetune, eval."
+        )
+
     epochs = args.epochs if args.epochs is not None else training_config.get("epochs", 1)
     # device = args.device if args.device is not None else training_config.get("device", "cuda")
 
-    device = f'cuda:{args.device}' #[i for i in range(torch.cuda.device_count())] #[int(arg) for arg in devices]
+    device = f'cuda:{args.device}'  # [i for i in range(torch.cuda.device_count())] #[int(arg) for arg in devices]
 
     output_config = config.get("output", {})
     output_root = (
@@ -197,41 +190,60 @@ def main():
             output_dir / "inspections"
         )
 
-    train_set, val_set, test_set, metadata = loadData(task_configs)
-    train_set = MultiPhysicsDataset(train_set)
-    val_set   = MultiPhysicsDataset(val_set)
-    test_set  = MultiPhysicsDataset(test_set)
-
-    train_loader = DataLoader(dataset = train_set, shuffle = False)
-    val_loader   = DataLoader(dataset = val_set,   shuffle = False)
-    test_loader  = DataLoader(dataset = test_set,  shuffle = False)    
+    train_loader, val_loader, test_loader, task_metadata = build_multitask_loaders(
+        task_configs,
+        seed=seed
+    )
 
     loader_channels = get_loaders_channels(train_loader)
     print("loader_channels:", loader_channels)
 
-    write_run_metadata(output_dir, config_path, config, metadata, loader_channels)
+    write_run_metadata(output_dir, config_path, config, task_metadata, loader_channels)
 
-    CORE_IDX = 0
-    core_checkpoint = load_from_dir(args.core_checkpoint)[CORE_IDX] if args.core_checkpoint is not None else None
-    liftings = load_from_dir(args.lift_checkpoint_dir) if args.lift_checkpoint_dir is not None else None
-    projections = load_from_dir(args.lift_checkpoint_dir) if args.proj_checkpoint_dir is not None else None
+    # CORE_IDX = 0
+    # core_checkpoint = load_from_dir(args.core_checkpoint)[CORE_IDX] if args.core_checkpoint is not None else None
+    # liftings = load_from_dir(args.lift_checkpoint_dir) if args.lift_checkpoint_dir is not None else None
+    # projections = load_from_dir(args.proj_checkpoint_dir) if args.proj_checkpoint_dir is not None else None
+    #
+    # model_blocks = build_model(loader_channels, model_config,
+    #                            core_checkpoint, liftings, projections)
 
-    model_blocks = build_model(loader_channels, model_config, 
-                               core_checkpoint, liftings, projections)
+    model_blocks = build_model(loader_channels, model_config)
+
+    if run_mode == "finetune":
+        model_blocks = load_finetune_checkpoint(
+            model_parts=model_blocks,
+            finetune_config=config.get("finetune"),
+            num_tasks=len(loader_channels),
+            map_location="cpu",
+        )
+    elif run_mode == "eval":
+        model_blocks = load_inference_checkpoint(
+            model_parts=model_blocks,
+            inference_config=config.get("inference"),
+            num_tasks=len(loader_channels),
+            map_location="cpu",
+        )
 
     if not isinstance(model_blocks, tuple):
-        print(f'Currently, we are aimed only on lifting-core-projections architectures, instead got a single model {type(model_blocks)}.')
+        raise TypeError(
+            f'Currently, we are aimed only on lifting-core-projections architectures, '
+            f'instead got a single model {type(model_blocks)}.'
+        )
 
+    model = Muno(liftings=model_blocks[0], core=model_blocks[1], projections=model_blocks[2])
 
-    if isinstance(model_blocks, tuple):
-        model = Muno(liftings = model_blocks[0], core = model_blocks[1], projections = model_blocks[2])
-    else:
-        model = Muno(single_model = model_blocks)
+    # if isinstance(model_blocks, tuple):
+    #     model = Muno(liftings=model_blocks[0], core=model_blocks[1], projections=model_blocks[2])
+    # else:
+    #     model = Muno(single_model=model_blocks)
 
-    DEFAULT_MODE = 'pretrain' # insert selection of the mode from a config
-    model.setMode(DEFAULT_MODE)
+    # DEFAULT_MODE = 'pretrain'  # insert selection of the mode from a config
+    # model.setMode(DEFAULT_MODE)
 
-    trainer = Trainer(backup_loc=str(checkpoint_dir)) # , devices=devices
+    model.setMode(run_mode)
+
+    trainer = Trainer(backup_loc=str(checkpoint_dir))  # , devices=devices
 
     trainer.gradient_accumulation_steps = int(training_config["gradient_accumulation_steps"])
     print(f"gradient_accumulation_steps: {trainer.gradient_accumulation_steps}")
@@ -282,7 +294,7 @@ def main():
         train_loader=train_loader,
         val_loader=val_loader,
         train_epochs=epochs,
-        data_processor=data_processors
+        data_processor=data_processors,
     )
 
     metrics_config = config.get("metrics", {})
@@ -292,9 +304,9 @@ def main():
     if evaluate_after_training and metrics_config:
         val_metrics = evaluate_multitask_loaders(
             trainer=trainer,
-            loaders=val_loader,
-            data_processors=data_processors,
-            task_metadata=metadata,
+            loader=val_loader,
+            data_processor=data_processors,
+            task_metadata=task_metadata,
             metrics_config=metrics_config,
             split_name="val"
         )
@@ -306,9 +318,9 @@ def main():
 
         test_metrics = evaluate_multitask_loaders(
             trainer=trainer,
-            loaders=test_loader,
-            data_processors=data_processors,
-            task_metadata=metadata,
+            loader=test_loader,
+            data_processor=data_processors,
+            task_metadata=task_metadata,
             metrics_config=metrics_config,
             split_name="test"
         )

@@ -118,15 +118,15 @@ class Normalizer(Transform):
 
     def cuda(self):
         self.mean = self.mean.cuda()
-        self.std  = self.std.cuda()
+        self.std = self.std.cuda()
 
     def cpu(self):
         self.mean = self.mean.cpu()
-        self.std  = self.std.cpu()
+        self.std = self.std.cpu()
 
     def to(self, *args, **kwargs):
         self.mean = self.mean.to(*args, **kwargs)
-        self.std  = self.std.to(*args, **kwargs)
+        self.std = self.std.to(*args, **kwargs)
 
 
 class UnitGaussianNormalizer(Transform):
@@ -212,7 +212,6 @@ class UnitGaussianNormalizer(Transform):
         _, self.std = iterativeSTD(data_batch, self.mask, prev_mean, self.mean, self.std,
                                    n_prev_elem=prev_numel, dim=self.dim)
 
-
     def incremental_update_mean_std(self, data_batch):
         prev_mean = self.mean
         prev_numel = self.n_elements
@@ -241,10 +240,10 @@ class UnitGaussianNormalizer(Transform):
         return self
 
     def to(self, *args, **kwargs):
-        if self.mask is not None: 
+        if self.mask is not None:
             self.mask = self.mask.to(*args, **kwargs)
         self.mean = self.mean.to(*args, **kwargs)
-        self.std  = self.std.to(*args, **kwargs)
+        self.std = self.std.to(*args, **kwargs)
 
     @classmethod
     def from_dataset(cls, dataset, dim=None, keys=None, mask=None):
@@ -285,9 +284,11 @@ class UnitGaussianNormalizer(Transform):
         with open(filename, 'rb') as f:
             loaded_dict = pickle.load(f)
 
-        assert ('mean' in loaded_dict.keys()) and ('std' in loaded_dict.keys()), 'Missing mean and std from loaded norm. dict'
+        assert ('mean' in loaded_dict.keys()) and (
+                    'std' in loaded_dict.keys()), 'Missing mean and std from loaded norm. dict'
         self.mean = loaded_dict['mean']
-        self.std  = loaded_dict['std']
+        self.std = loaded_dict['std']
+
 
 class DictUnitGaussianNormalizer(DictTransform):
     """DictUnitGaussianNormalizer composes
@@ -370,20 +371,19 @@ class MultiphysicsUnitGaussianNormalizer(Transform):
             f'in MultiphysicsUnitGaussianNormalizer inputs should be passed as a dict of samples, \
               where key - id of physics, all vals - DICTs ("x": ..., "y": ...). Instead got \
               {[type(subbatch) for subbatch in data_batch.values()]}'
-        return 
+        return
 
     def fit(self, data_batch: dict):
         self.assertions(data_batch)
-        
+
         for idx, subbatch in data_batch.items():
             self.normalizers[idx].fit(subbatch[self._key])
 
     def partial_fit(self, data_batch: dict, batch_size: int = 1):
         self.assertions(data_batch)
-        
-        for idx, subbatch in data_batch.items():
-            self.normalizers[idx].partial_fit(subbatch[self._key], batch_size = batch_size)
 
+        for idx, subbatch in data_batch.items():
+            self.normalizers[idx].partial_fit(subbatch[self._key], batch_size=batch_size)
 
     def transform(self, data_batch: dict):
         self.assertions(data_batch)
@@ -397,13 +397,14 @@ class MultiphysicsUnitGaussianNormalizer(Transform):
         # self.assertions(data_batch)
 
         for key, val in data_batch.items():
-            data_batch[key] = self.normalizers[key].inverse_transform(val) # [self._key] [self._key]
+            data_batch[key] = self.normalizers[key].inverse_transform(val)  # [self._key] [self._key]
 
         return data_batch
 
     def to(self, device):
         for key in self.normalizers.keys():
             self.normalizers[key].to(device)
+        return self
 
     def to_file(self, filenames: List[str]):
         assert all(['pkl' in name for name in filenames]), 'Incorrect filename'
@@ -426,5 +427,5 @@ class MultiphysicsUnitGaussianNormalizer(Transform):
 
         # assert ('mean' in loaded_dict.keys()) and ('std' in loaded_dict.keys()), 'Missing mean and std from loaded norm. dict'
         # self.mean = loaded_dict['mean']
-        # self.std  = loaded_dict['std']            
+        # self.std  = loaded_dict['std']
 

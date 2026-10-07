@@ -1,0 +1,90 @@
+{
+  "config_path": "D:\\PycharmProjects\\FoundNO-main\\experiments\\configs\\poseidon_debug.yaml",
+  "task_metadata": [
+    {
+      "eq_idx": 0,
+      "source": {
+        "location": "huggingface",
+        "format": "netcdf",
+        "repo_id": "camlab-ethz/SE-AF",
+        "filename": "SE-AF.nc",
+        "cache_dir": "D:\\datasets_cache",
+        "variable_name": "solution",
+        "sample_dim": "sample"
+      },
+      "adapter": {
+        "type": "index",
+        "variable_name": null,
+        "data_order": "CHW",
+        "input_indices": [
+          0
+        ],
+        "output_indices": [
+          1
+        ],
+        "benchmark_name": "POSEIDON",
+        "physics_name": "SE-AF"
+      }
+    },
+    {
+      "eq_idx": 1,
+      "source": {
+        "location": "huggingface",
+        "format": "multi_netcdf",
+        "repo_id": "camlab-ethz/Wave-Gauss",
+        "cache_dir": "D:\\datasets_cache",
+        "length_component": "solution",
+        "components": {
+          "solution": {
+            "files": [
+              {
+                "filename": "solution_0.nc"
+              }
+            ],
+            "variable_name": "solution",
+            "sample_dim": "sample"
+          },
+          "c": {
+            "filename": "c_0.nc",
+            "variable_name": "c",
+            "sample_dim": "sample"
+          }
+        }
+      },
+      "adapter": {
+        "type": "temporal",
+        "variable_name": "solution",
+        "data_order": "THW",
+        "input_time_indices": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "output_time_indices": [
+          4,
+          5
+        ],
+        "static_inputs": [
+          {
+            "variable_name": "c",
+            "data_order": "HW",
+            "target": "x"
+          }
+        ],
+        "benchmark_name": "POSEIDON",
+        "physics_name": "Wave-Gauss"
+      }
+    }
+  ],
+  "loader_channels": [
+    [
+      1,
+      1
+    ],
+    [
+      5,
+      2
+    ]
+  ]
+}

@@ -5,7 +5,10 @@ import matplotlib.pyplot as plt
 import torch
 
 from muno.data.benchmarks.pipeline import build_source, build_adapter
-
+from muno.data.benchmarks.pipeline_utils import (
+    resolve_trajectory_indices,
+    resolve_index_split
+)
 
 SPATIAL_AXES = {"X", "Y", "H", "W"}
 
@@ -68,8 +71,37 @@ def print_tensor_summary(prefix, value, axis_names=None):
             else:
                 print(f"    {key}: {item}")
         return
-
     print(f"  {prefix}: {summary}")
+
+
+def print_temporal_inspection(adapter_config):
+    if adapter_config["type"] != "temporal":
+        return
+
+    temporal_mode = adapter_config["temporal_mode"]
+    print(f"temporal_mode: {temporal_mode}")
+
+    if temporal_mode == "initial_to_trajectory":
+        print(f"input_time_index: {adapter_config['input_time_index']}")
+        print(f"output_time_indices: {adapter_config['output_time_indices']}")
+
+    elif temporal_mode == "window":
+        input_time_indices = adapter_config['input_time_indices']
+        output_time_indices = adapter_config['output_time_indices']
+        window_start_indices = adapter_config['window_start_indices']
+
+        print("input_time_indices: ", input_time_indices)
+        print("output_time_indices: ", output_time_indices)
+        print("window_start_indices: ", window_start_indices)
+
+        print("\neffective_windows:")
+        for ws_idx in window_start_indices:
+            print(f"start = {ws_idx}: "
+                  f"input = {[ws_idx + i for i in input_time_indices]}; "
+                  f"output = {[ws_idx + o for o in output_time_indices]}")
+
+    else:
+        raise ValueError(f"Unknown temporal_mode for inspection: {temporal_mode}")
 
 
 def image_from_order(tensor, data_order, time_index=0, channel_index=0):
@@ -90,7 +122,6 @@ def image_from_order(tensor, data_order, time_index=0, channel_index=0):
             selection.append(0)
 
     image = tensor[tuple(selection)]
-
     while image.ndim > 2:
         image = image[0]
 
@@ -99,26 +130,21 @@ def image_from_order(tensor, data_order, time_index=0, channel_index=0):
 
 def first_spatial_image(tensor):
     image = tensor
-
     while image.ndim > 2:
         image = image[0]
-
     return image
 
 
 def canonical_image(tensor, channel_index=0, time_index=0):
     if tensor.ndim == 2:
         return tensor
-
-    if tensor.ndim == 3:
+    elif tensor.ndim == 3:
         # [C, H, W]
         return tensor[channel_index]
-
-    if tensor.ndim == 4:
+    elif tensor.ndim == 4:
         # [C, T, H, W]
         return tensor[channel_index, time_index]
-
-    if tensor.ndim == 5:
+    elif tensor.ndim == 5:
         # [B, C, T, H, W]
         return tensor[0, channel_index, time_index]
 
@@ -137,11 +163,9 @@ def adapter_raw_axis_names(adapter_config):
 def canonical_axis_names(tensor):
     if tensor.ndim == 3:
         return ["C", "X", "Y"]
-
-    if tensor.ndim == 4:
+    elif tensor.ndim == 4:
         return ["C", "T", "X", "Y"]
-
-    if tensor.ndim == 5:
+    elif tensor.ndim == 5:
         return ["C", "T", "X", "Y", "Z"]
 
     return None
@@ -226,6 +250,18 @@ def get_inspection_sample_index(task_config, source):
     if "sample_index" in inspection_config:
         return inspection_config["sample_index"]
 
+    if "trajectory_selection" in task_config:
+        trajectory_indices = resolve_trajectory_indices(
+            source,
+            task_config.get("trajectory_selection")
+        )
+        split = resolve_index_split(
+            trajectory_indices,
+            task_config["split"],
+            max_samples_per_split=task_config.get("max_samples_per_split")
+        )
+        return split["train"][0]
+
     split_config = task_config["split"]
     split_type = split_config.get("type", "explicit")
 
@@ -260,6 +296,8 @@ def inspect_task(task_config, output_dir, eq_idx):
     print_tensor_summary("raw", raw_sample, axis_names=raw_axis_names)
     print_tensor_summary("canonical x", canonical_sample["x"], axis_names=x_axis_names)
     print_tensor_summary("canonical y", canonical_sample["y"], axis_names=y_axis_names)
+
+    print_temporal_inspection(task_config["adapter"])
 
     print(f"  benchmark_name: {canonical_sample['benchmark_name']}")
     print(f"  physics_name: {canonical_sample['physics_name']}")

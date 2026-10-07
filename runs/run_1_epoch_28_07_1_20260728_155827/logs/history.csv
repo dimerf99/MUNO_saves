@@ -1,0 +1,1 @@
+epoch,train_loss,val_loss,lr,epoch_seconds,elapsed_seconds,best_val_loss,checkpoint_saved

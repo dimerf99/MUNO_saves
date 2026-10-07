@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
-from neuraloperator.neuralop.models import FNO
+from neuralop.models import FNO
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec

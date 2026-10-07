@@ -1,5 +1,5 @@
 import time
-from typing import Union, List
+from typing import Union
 
 import math
 import numpy as np
@@ -12,7 +12,7 @@ from torch.utils.data import Dataset, DataLoader
 from neuralop.layers.embeddings import GridEmbeddingND, GridEmbedding2D
 from neuralop.layers.channel_mlp import ChannelMLP
 from neuralop.layers.complex import ComplexValued
-from neuralop.models import FNO, UNO        # user had this import in latest snippet
+from neuralop.models import FNO        # user had this import in latest snippet
 from neuralop.layers.padding import DomainPadding
 from neuralop.models.base_model import BaseModel
 
@@ -312,7 +312,9 @@ class PostLiftMambaProcessorND(nn.Module):
         return out
 
 
+# -------------------------
 # FNO subclass: apply Mamba after lifting (post-lift)
+# -------------------------
 class PostLiftMambaFNO(FNO):
     def __init__(self,
                  in_channels=3,
@@ -332,7 +334,7 @@ class PostLiftMambaFNO(FNO):
                          hidden_channels=width,
                          in_channels=in_channels,
                          out_channels=out_channels,
-                         domain_padding=padding,
+                         padding=padding,
                          factorization='tucker',
                          rank=0.05,
                          implementation='factorized',                         
@@ -384,89 +386,6 @@ class PostLiftMambaFNO(FNO):
         # 7) projection to output channels
         x = self.projection(x)
         return x
-
-
-# UNO subclass: apply Mamba after lifting (post-lift)
-class PostLiftMambaUNO(UNO):
-    def __init__(self,
-                 in_channels: int = 3,
-                 out_channels: int = 1,
-                 uno_n_modes: tuple = (64, 64),
-                 uno_out_channels: List[int] = [32, 32, 32],
-                 width: Union[int, List[int]] = 32,
-                 uno_scalings: List[List[float]] = [[1., 1.], [1., 1.], [1., 1.]],
-                 non_linearity = torch.nn.functional.gelu,
-                 horizontal_skips_map: dict = {2:0,},
-                 n_layers=3,
-                 use_mamba_kwargs=None,
-                 mamba_fallback_kernel=9,
-                 padding=8,
-                 use_mlp=True):
-        """
-        A compact FNO that runs the standard lifting, then a Mamba/SSM processor across spatial axis,
-        then continues with FNO spectral blocks and projection.
-        """
-        super().__init__(uno_n_modes=uno_n_modes,
-                         hidden_channels=width,
-                         in_channels=in_channels,
-                         out_channels=out_channels,
-                         uno_scalings=uno_scalings,
-                         uno_out_channels=uno_out_channels,
-                         non_linearity=non_linearity,
-                         horizontal_skips_map=horizontal_skips_map,
-                         domain_padding=padding,
-                         factorization='tucker',
-                         rank=0.15,
-                         implementation='factorized',                         
-                         channel_mlp_dropout = 0.1,
-                         channel_mlp_skip='linear',
-                         n_layers=n_layers)
-
-        # post-lift processor (Mamba or fallback)
-        self.post_lift_ssm = PostLiftMambaProcessor(hidden_channels=width,
-                                                    mamba_kwargs=use_mamba_kwargs,
-                                                    fallback_kernel=mamba_fallback_kernel)
-
-    def forward(self, x, output_shape=None, **kwargs):
-        """
-        FNO forward with Post-lift SSM:
-         - positional embedding (optional)
-         - lifting (inherited)
-         - domain padding (optional)
-         - post-lift Mamba / SSM across spatial axis per time-slice
-         - FNO blocks, unpad, projection
-        """
-        if output_shape is None:
-            output_shape = [None] * self.n_layers
-        elif isinstance(output_shape, tuple):
-            output_shape = [None] * (self.n_layers - 1) + [output_shape]
-
-        # 1) positional embedding (if configured)
-        if self.positional_embedding is not None:
-            x = self.positional_embedding(x)
-
-        # 2) lifting -> [B, C, T, X]
-        x = self.lifting(x)
-
-        # 3) domain padding (optional)
-        if self.domain_padding is not None:
-            x = self.domain_padding.pad(x)
-
-        # 4) post-lift SSM processing (Mamba or fallback)
-        x = self.post_lift_ssm(x)  # [B, C, T, X]
-
-        # 5) apply FNO blocks
-        for layer_idx in range(self.n_layers):
-            x = self.fno_blocks(x, layer_idx, output_shape=output_shape[layer_idx])
-
-        # 6) unpad (if was padded)
-        if self.domain_padding is not None:
-            x = self.domain_padding.unpad(x)
-
-        # 7) projection to output channels
-        x = self.projection(x)
-        return x
-
 
 class PostLiftMambaFNO3D(FNO):
     def __init__(self, in_channels=5, out_channels=2, modes=(32, 32, 16), width=32, n_layers=4,

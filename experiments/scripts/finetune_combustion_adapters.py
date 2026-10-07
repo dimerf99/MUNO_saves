@@ -23,7 +23,7 @@ from neuralop.layers.channel_mlp import ChannelMLP
 
 def load_post_lift_mamba_lifting():
     module_path = Path(__file__).resolve().parents[2] / "muno" / "models" / "mamba_fno.py"
-    spec = importlib.util.spec_from_file_location("_muno_mamba_fno", module_path)
+    spec = importlib.util.spec_from_file_location("_fnofound_mamba_fno", module_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load mamba_fno module from {module_path}")
     module = importlib.util.module_from_spec(spec)

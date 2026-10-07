@@ -61,7 +61,7 @@ def build_debug_model(loader_channels):
 
 def write_run_metadata(output_dir, task_metadata, loader_channels, config_path):
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True) 
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     metadata = {
         "config_path": str(config_path),
@@ -105,7 +105,7 @@ def main():
     trainer.setLogger(filename=str(log_path))
     trainer.buildModel(model)
 
-    trainer.save_paths = (
+    trainer._save_paths = (
         [
             str(backup_dir / f"lift_{idx}.pt")
             for idx in range(len(train_loaders))

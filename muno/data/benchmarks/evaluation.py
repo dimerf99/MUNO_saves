@@ -62,38 +62,30 @@ def compute_batch_metrics(pred, target, metrics_config, task_name):
 
 
 def set_trainer_eval_mode(trainer):
-    if trainer._single_model:
-        trainer.model.eval()
-    else:
-        trainer.main_fno.eval()
-
-        for input_adapter, output_adapter in zip(
-            trainer.input_adapters,
-            trainer.output_adapters,
-        ):
-            input_adapter.eval()
-            output_adapter.eval()
+    model = trainer.model
+    if model is None:
+        raise RuntimeError("Model has not been declared before evaluation.")
+    model.eval()
 
 
 def predict_batch(trainer, sample, data_processor=None):
-    sample = dict(sample)
+    assert isinstance(sample, dict), "Sample has to be passed as dict."
 
-    sample["x"] = sample["x"].to(trainer.device)
-    sample["y"] = sample["y"].to(trainer.device)
+    for key in sample.keys():
+        sample[key]["x"] = sample[key]["x"].to(trainer.device)
+        sample[key]["y"] = sample[key]["y"].to(trainer.device)
 
-    if "mask" in sample:
-        sample["mask"] = sample["mask"].to(trainer.device)
+        if "mask" in sample[key]:
+            sample[key]["mask"] = sample[key]["mask"].to(trainer.device)
 
     if data_processor is not None:
         sample = data_processor.preprocess(sample, training=False)
 
-    if trainer._single_model:
-        pred = trainer.model(sample["x"])
-    else:
-        eq_idx = int(sample["eq_idx"][0].item())
-        pred = trainer.input_adapters[eq_idx](sample["x"])
-        pred = trainer.main_fno(pred)
-        pred = trainer.output_adapters[eq_idx](pred)
+    model = trainer.model
+    if model is None:
+        raise RuntimeError("Model has not been declared before evaluation.")
+
+    pred = model({key: sample[key]["x"] for key in sample})
 
     if data_processor is not None:
         pred, sample = data_processor.postprocess(
@@ -102,7 +94,12 @@ def predict_batch(trainer, sample, data_processor=None):
             training=False,
         )
 
-    return pred, sample["y"]
+    target = {
+        key: sample[key]["y"]
+        for key in sample
+    }
+
+    return pred, target
 
 
 def evaluate_loader(
@@ -110,10 +107,10 @@ def evaluate_loader(
     loader,
     data_processor,
     metrics_config,
-    task_name,
+    task_metadata,
 ):
     metric_sums = {}
-    n_samples = 0
+    metrics_count = {}
 
     set_trainer_eval_mode(trainer)
 
@@ -125,58 +122,52 @@ def evaluate_loader(
                 data_processor=data_processor,
             )
 
-            batch_metrics = compute_batch_metrics(
-                pred,
-                target,
-                metrics_config=metrics_config,
-                task_name=task_name,
-            )
+            for task_idx in pred.keys():
+                task_name = task_metadata[task_idx].get("name", f"task_{task_idx}")
 
-            batch_size = int(target.shape[0])
-            n_samples += batch_size
+                batch_metrics = compute_batch_metrics(
+                    pred[task_idx],
+                    target[task_idx],
+                    metrics_config=metrics_config,
+                    task_name=task_name,
+                )
 
-            for name, value in batch_metrics.items():
-                metric_sums[name] = metric_sums.get(name, 0.0) + float(value) * batch_size
+                batch_size = int(target[task_idx].shape[0])
 
-    if n_samples == 0:
+                for name, value in batch_metrics.items():
+                    metric_key = f"{task_name}/{name}"
+                    metric_sums[metric_key] = metric_sums.get(metric_key, 0.0) + float(value) * batch_size
+                    metrics_count[metric_key] = metrics_count.get(metric_key, 0) + batch_size
+
+    if not metric_sums:
         return {}
 
     return {
-        name: value / n_samples
-        for name, value in metric_sums.items()
+        metric_key: metric_sums[metric_key] / metrics_count[metric_key]
+        for metric_key in metric_sums.keys()
     }
 
 
 def evaluate_multitask_loaders(
     trainer,
-    loaders,
-    data_processors,
+    loader,
+    data_processor,
     task_metadata,
     metrics_config,
     split_name,
 ):
-    results = {}
+    task_metrics = evaluate_loader(
+        trainer=trainer,
+        loader=loader,
+        data_processor=data_processor,
+        metrics_config=metrics_config,
+        task_metadata=task_metadata,
+    )
 
-    for task_idx, loader in enumerate(loaders):
-        task_name = task_metadata[task_idx].get("name", f"task_{task_idx}")
-        data_processor = data_processors[task_idx]
-
-        task_metrics = evaluate_loader(
-            trainer=trainer,
-            loader=loader,
-            data_processor=data_processor,
-            metrics_config=metrics_config,
-            task_name=task_name,
-        )
-
-        results.update(
-            prefix_metrics(
-                task_metrics,
-                f"{split_name}/{task_name}",
-            )
-        )
-
-    return results
+    return prefix_metrics(
+        task_metrics,
+        split_name,
+    )
 
 
 def save_metrics(metrics, output_dir, filename_stem):

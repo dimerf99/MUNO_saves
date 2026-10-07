@@ -23,7 +23,7 @@ def download_url_to_path(url, path, chunk_size=CHUNK_SIZE):
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if path.exists():
-        print(f"using cached file: {path}")
+        print(f"\nusing cached file: {path}")
         return str(path)
 
     tmp_path = path.with_suffix(path.suffix + ".part")

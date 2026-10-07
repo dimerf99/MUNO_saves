@@ -5,7 +5,6 @@ import json
 import csv
 import time
 from functools import reduce
-
 from pathlib import Path
 
 import math
@@ -15,10 +14,7 @@ from typing import Tuple, List, Union
 
 import numpy as np
 import torch
-
 import torch.distributed as dist
-from torch.distributed.optim import DistributedOptimizer
-from torch.distributed.rpc import RRef
 
 import dill
 
@@ -34,30 +30,66 @@ from .optimizer_utils import set_optimizer, set_scheduler
 from .training_utils import LpLoss
 
 
+def basicLoadModel(model_path: Union[str, Tuple[None, str, Tuple[str]]], _SAVE_LOAD_PARAMS: dict = {}):
+    if isinstance(model_path, str):
+        # assert isinstance(model_path, str), 'Saving of a single model requires a single path str argument'
+        model = torch.load(f=model_path, pickle_module=dill, **_SAVE_LOAD_PARAMS)
+    else:
+        assert isinstance(model_path, tuple) and len(model_path) == 3, \
+            'Saving lifting-main part-projection model requires tuple of str arg with len 3.'
+        assert isinstance(model_path[1], str), 'Main core path has to be a str.'
+        main_fno = torch.load(f=model_path[1], pickle_module=dill, **_SAVE_LOAD_PARAMS)
+
+        if model_path[0] is None:
+            assert (model_path[0] is None), 'Can not load projections without liftings.'
+            input_adapters, output_adapters = None, None
+
+        elif isinstance(model_path[0], str):
+            assert isinstance(model_path[2], str), 'If lifting is passed as a str, proj. has to be a str too.'
+            input_adapters = torch.load(f=model_path[0], pickle_module=dill, **_SAVE_LOAD_PARAMS)
+            output_adapters = torch.load(f=model_path[2], pickle_module=dill, **_SAVE_LOAD_PARAMS)
+
+        else:
+            assert (isinstance(model_path[0], (list, tuple))), \
+                'Liftings have to be passed as list or tuple, if multiple adapters are expected.'
+            assert (len(model_path[0]) == len(model_path[2])), \
+                f'If liftings are passed as {len(model_path[0])} elems, proj. has to be a {len(model_path[2])} elems.'
+            input_adapters, output_adapters = [], []
+            for adapter_idx in range(len(model_path[0])):
+                input_adapters.append(torch.load(f=model_path[0][adapter_idx], pickle_module=dill, **_SAVE_LOAD_PARAMS))
+                output_adapters.append(
+                    torch.load(f=model_path[2][adapter_idx], pickle_module=dill, **_SAVE_LOAD_PARAMS))
+
+        model = (input_adapters, main_fno, output_adapters)
+
+    return model
+
+
 class Trainer(object):
     mixed_precision = False  # Load them from param json
     verbose = False
     eval_interval = 1000
-    device = None
 
     _SAVE_LOAD_PARAMS = {}
 
-    def __init__(self, backup_loc: str = None, device = None):# , devices: List[int] = [0,]):
+    def __init__(self, backup_loc: str = None, device=None):  # , devices: List[int] = [0,]):
         try:
             self.local_rank = int(os.environ["LOCAL_RANK"])
         except KeyError:
             self.local_rank = 0
 
         try:
-            self.global_rank = int(os.environ["RANK"])  
+            self.global_rank = int(os.environ["RANK"])
         except KeyError:
-            self.global_rank = 0            
+            self.global_rank = 0
 
         if backup_loc is None:
             backup_loc = os.path.join(os.getcwd(), 'backup')
         self._backup_loc = backup_loc
 
         self.model = None
+        self.device = None
+        self._muno_model = False
         self._best_val_loss = torch.inf
 
         self._history_csv_path = None
@@ -68,7 +100,6 @@ class Trainer(object):
 
         if device is not None:
             self.to(device)
-
 
     @singledispatchmethod
     def buildModel(self, model):
@@ -104,34 +135,11 @@ class Trainer(object):
     @buildModel.register
     def _(self, model: tuple):  # expect Tuple[List[torch.nn.Module], torch.nn.Module, List[torch.nn.Module]]
         raise NotImplementedError('Depricated method, use Muno model instead.')
-        assert len(model) == 3, \
-            'Multiple adapter architecture requires sequence of input adapters -> single model -> output adapters'
 
-        assert isinstance(model[0], list) and isinstance(model[0][0], torch.nn.Module), \
-            'Liftings have to be set as a list of torch nn Modules'
-
-        assert isinstance(model[1], torch.nn.Module), \
-            'Main neural operator model has to be set as a single torch nn Module'
-
-        assert isinstance(model[2], list) and isinstance(model[2][0], torch.nn.Module), \
-            'Projections have to be set as a list of torch nn Modules'
-
-        assert len(model[0]) == len(model[2]), 'Numbers of liftings and projections have to match.'
-
-        self._single_model = False
-        self.input_adapters = model[0]
-        self.main_fno = model[1]
-        self.output_adapters = model[2]
-
-        self.params_to_optimize = []
-
-        # all changes in pdebench_multiphysics_pretrain.yaml ###########################################################
-        if getattr(self, "train_main_fno", False):
-            self.params_to_optimize.append({"params": self.main_fno.parameters()})
-
-        for idx_expert_nn, _ in enumerate(self.input_adapters):
-            self.params_to_optimize.append({"params": self.input_adapters[idx_expert_nn].parameters()})
-            self.params_to_optimize.append({"params": self.output_adapters[idx_expert_nn].parameters()})
+    def addTrainableParams(self, module):
+        params = [param for param in module.parameters() if param.requires_grad]
+        if params:
+            self.params_to_optimize.append({"params": params})
 
     def buildOptimizer(self,
                        n_dim: int,
@@ -140,11 +148,6 @@ class Trainer(object):
                        trainer_loss=None):
         assert self.params_to_optimize is not None, 'Optimizer has to be constructed only after model declaration.'
 
-        if self.model is None:
-            raise RuntimeError("Model has not been declacred before optimizer initialization.")
-        # if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
-        #     self.optimizer = DistributedOptimizer()
-            
         self.optimizer = set_optimizer(params_opt, self.params_to_optimize)
         self.scheduler = set_scheduler(params_scheduler, self.optimizer)
 
@@ -155,18 +158,9 @@ class Trainer(object):
 
     def to(self, device: str = 'cuda'):
         self.device = device
-
-        # if self._single_model:
-        self.model.to(device)
-
-        # else:
-        #     if self.main_fno is None or self.input_adapters is None or self.output_adapters is None:
-        #         raise AttributeError('Hidden Fourier NO layers and projection or liftings are not yet declared.')
-
-        #     self.main_fno.to(device)
-        #     for idx, _ in enumerate(self.input_adapters):
-        #         self.input_adapters[idx].to(device)
-        #         self.output_adapters[idx].to(device)
+        if self.model is None:
+            return
+        self.model.to(self.device)
 
     def setLogger(self, filename, logger: Logger = None, log_level=logging.INFO, logger_name: str = "FoundationalFNO"):
         if logger is None:
@@ -238,9 +232,9 @@ class Trainer(object):
         with open(self._history_jsonl_path, "a", encoding="utf-8") as file:
             file.write(json.dumps(record) + "\n")
 
-    def saveModel(self, model_path: Tuple[str, List[str]]): # Union[str, ] 
+    def saveModel(self, model_path: Tuple[str, List[str]]):  # Union[str, ]
         if isinstance(self.model, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)):
-            model = self.model.module 
+            model = self.model.module
         else:
             model = self.model
 
@@ -255,8 +249,8 @@ class Trainer(object):
             assert isinstance(model_path, str), 'Saving of a single model requires a single path str argument'
             torch.save(obj=model, f=model_path, pickle_module=dill, **self._SAVE_LOAD_PARAMS)
 
-
-    def loadModel(self, model_path: Union[str, Tuple[None, str, Tuple[str]]], # use_data_parallel: bool = False, devices: Union[int, List[int]] = [], 
+    def loadModel(self, model_path: Union[str, Tuple[None, str, Tuple[str]]],
+                  # use_data_parallel: bool = False, devices: Union[int, List[int]] = [],
                   **_SAVE_LOAD_PARAMS):
         if isinstance(model_path, str):
             self.model = torch.load(f=model_path, pickle_module=dill, **_SAVE_LOAD_PARAMS)
@@ -265,26 +259,14 @@ class Trainer(object):
             # if use_data_parallel:
             #     self.model = self.model.toDataParallel(devices=devices)
 
-        # model = basicLoadModel(model_path, self._SAVE_LOAD_PARAMS)
-        # if isinstance(model, tuple):
-        #     self._single_model = False
-
-        #     self.input_adapters = model[0]
-        #     self.main_fno = model[1]
-        #     self.output_adapters = model[2]
-        # else:
-        #     self.model = model
-        #     self.params_to_optimize = [{'params': self.model.parameters()}, ]
-        #     self._single_model = True
-
     def loadData(self, file):
         pass
 
     def train(self, train_loader: MultiPhysicsDataset, val_loader: MultiPhysicsDataset,
               train_epochs: int, data_processor: Union[list, DataProcessor] = None, GA_size: int = 4):
         '''
-        refactored from train_loader: Union[DataLoader, list], val_loader: Union[DataLoader, list] to 
-        train_loader: muno.data.benchmarks.datasets.MultiPhysicsDataset, 
+        refactored from train_loader: Union[DataLoader, list], val_loader: Union[DataLoader, list] to
+        train_loader: muno.data.benchmarks.datasets.MultiPhysicsDataset,
         val_loader: muno.data.benchmarks.datasets.MultiPhysicsDataset,
         '''
         # if isinstance(train_loader, DataLoader):
@@ -311,7 +293,7 @@ class Trainer(object):
         # if self._single_model:
         n_params = sum(p.numel() for p in self.model.parameters())
         init_log = 'Initializing training of model of type' + \
-                    ' {} | epochs: {} | n params: {}'.format(type(self.model),
+                   ' {} | epochs: {} | n params: {}'.format(type(self.model),
                                                             train_epochs,
                                                             n_params)
 
@@ -347,14 +329,15 @@ class Trainer(object):
                 self.logTraining(train_loss=train_loss, val_loss=val_loss, lr=0)
 
         return self.model
-    
+
         # if self._single_model:
         #     return self.model
         # else:
         #     return self.input_adapters, self.main_fno, self.output_adapters
 
     def trainSingleEpoch(self, epoch, train_loader: List[DataLoader], val_loader: List[DataLoader],
-                         training_loss, data_processor: None, # List[DataProcessor] = [None, ],  # training: bool = True,
+                         training_loss, data_processor: None,
+                         # List[DataProcessor] = [None, ],  # training: bool = True,
                          GA_size: int = 4):
         """trainSingleEpoch trains self.model on train_loader
         for one epoch and returns training metrics
@@ -377,7 +360,7 @@ class Trainer(object):
 
         self.model.train()
 
-        if data_processor is not None: # [0]
+        if data_processor is not None:  # [0]
             # for idx in range(len(data_processor)):
             data_processor.train()
 
@@ -400,7 +383,7 @@ class Trainer(object):
                 n_fine_samples -= 1
                 continue
 
-            accumulated_loss = accumulated_loss + loss #.item()
+            accumulated_loss = accumulated_loss + loss  # .item()
             with torch.no_grad():
                 train_loss += loss.item()
 
@@ -413,7 +396,7 @@ class Trainer(object):
         if not torch.isclose(accumulated_loss, torch.tensor([0.0, ], dtype=torch.float32, device=self.device)):
             accumulated_loss.backward()
             self.optimizer.step()
-            self.optimizer.zero_grad(set_to_none=True)                
+            self.optimizer.zero_grad(set_to_none=True)
 
         del loss, accumulated_loss
         torch.cuda.empty_cache()
@@ -488,15 +471,23 @@ class Trainer(object):
     @save_paths.setter
     def save_paths(self, paths):
         if self._muno_model:
-            assert isinstance(paths, (tuple, list)), \
-                "Save paths have to be tuple/list in case of a multiple adapter model."
-            
+            assert isinstance(paths, (tuple, list)) and len(paths) == 3, \
+                "Save paths have to be tuple/list of length 3 in case of a multiple adapter model."
+
             assert isinstance(paths[1], str), \
                 "Save path for a core has to be a string in case of a multiple adapter model."
 
             assert all(isinstance(paths[idx], (tuple, list)) for idx in [0, 2]), \
                 "Save paths for adapters have to be passed as list/tuple of strings."
 
+            assert len(paths[0]) == len(paths[2]), \
+                "Liftings and projections save paths must have the same length."
+
+            assert all(isinstance(path, str) for path in paths[0]), \
+                "All lifting save paths must be strings."
+
+            assert all(isinstance(path, str) for path in paths[2]), \
+                "All projection save paths must be strings."
         else:
             assert isinstance(paths, str), \
                 "Save paths have to be strings in case of a single model."
@@ -533,7 +524,7 @@ class Trainer(object):
             #     assert isinstance(self._save_paths, str), (
             #         "Save paths have to be strings in case of a single model."
             #     )
-            self.saveModel(self.save_paths)                
+            self.saveModel(self.save_paths)
 
         return checkpoint_saved
 
@@ -545,8 +536,8 @@ class Trainer(object):
         ----------
         idx : int
             index of batch within train_loader
-        sample : tuple(torch.Tensor, torch.Tensor, int)
-            data tuple holding one batch
+        sample : dict(torch.Tensor, torch.Tensor, int)
+            data dict holding one batch
 
         Returns
         -------
@@ -558,7 +549,7 @@ class Trainer(object):
         assert isinstance(sample[test_key], dict), \
             'A sample, obtained for a single-physics dataset has to be a dict.'
 
-        for key in sample.keys():    
+        for key in sample.keys():
             sample[key]["x"] = sample[key]["x"].to(self.device)
             sample[key]["y"] = sample[key]["y"].to(self.device)
 
@@ -573,16 +564,12 @@ class Trainer(object):
 
         if self.mixed_precision:
             raise NotImplementedError('No mixed precision functionality implemented!')
-            with torch.autocast(device_type=self.autocast_device_type):
-                if self._single_model:
-                    out = self.model(sample["x"])
-                else:
-                    out = self.input_adapters[sample["eq_idx"][0].item()](sample["x"])
-                    out = self.main_fno(out)
-                    out = self.output_adapters[sample["eq_idx"][0].item()](out)
-
         else:
-            out = self.model({key: sample[key]["x"] for key in sample})
+            model = self.model
+            if model is None:
+                raise RuntimeError("Model has not been declared before training.")
+            else:
+                out = model({key: sample[key]["x"] for key in sample})
 
         if data_processor is not None:
             out, sample = data_processor.postprocess(out, sample, training=training)
@@ -592,18 +579,22 @@ class Trainer(object):
         if self.mixed_precision:
             with torch.autocast(device_type=self.autocast_device_type):
                 if isinstance(training_loss, list):
-                    loss = reduce(torch.add, [reduce(torch.add, 
-                                                     [loss_func(out[bkey], sample[bkey]["y"], mask[bkey]) for loss_func in training_loss]) 
-                                  for bkey in sample.keys()])
+                    loss = reduce(torch.add, [reduce(torch.add,
+                                                     [loss_func(out[bkey], sample[bkey]["y"], mask[bkey]) for loss_func
+                                                      in training_loss])
+                                              for bkey in sample.keys()])
                 else:
-                    loss = reduce(torch.add, [training_loss(out[bkey], sample[bkey]["y"], mask[bkey]) for bkey in sample.keys()]) 
+                    loss = reduce(torch.add,
+                                  [training_loss(out[bkey], sample[bkey]["y"], mask[bkey]) for bkey in sample.keys()])
         else:
             if isinstance(training_loss, list):
                 loss = reduce(torch.add, [reduce(torch.add,
-                                                 [loss_func(out[bkey], sample[bkey]["y"], mask[bkey]) for loss_func in training_loss]) 
-                              for bkey in sample.keys()])
+                                                 [loss_func(out[bkey], sample[bkey]["y"], mask[bkey]) for loss_func in
+                                                  training_loss])
+                                          for bkey in sample.keys()])
             else:
-                loss = reduce(torch.add, [training_loss(out[bkey], sample[bkey]["y"], mask[bkey]) for bkey in sample.keys()]) 
+                loss = reduce(torch.add,
+                              [training_loss(out[bkey], sample[bkey]["y"], mask[bkey]) for bkey in sample.keys()])
 
         return loss
 

@@ -1,0 +1,2 @@
+{"epoch": 0, "train_loss": 1.0323803462691206, "val_loss": 1.0479254552190846, "lr": 0.001, "epoch_seconds": 248.4142911999952, "elapsed_seconds": 248.41855379997287, "best_val_loss": 1.0479254552190846, "checkpoint_saved": true}
+{"epoch": 1, "train_loss": 0.693409072682911, "val_loss": 0.9476234824350565, "lr": 0.001, "epoch_seconds": 235.22203379997518, "elapsed_seconds": 483.6458081000019, "best_val_loss": 0.9476234824350565, "checkpoint_saved": true}

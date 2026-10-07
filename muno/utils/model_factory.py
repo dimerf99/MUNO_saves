@@ -12,10 +12,12 @@ from typing import Union, List
 import torch
 
 from neuralop.layers.channel_mlp import ChannelMLP
+from neuralop.layers.spectral_convolution import SpectralConv
 from neuralop.models import UNO, FNO
 
 from muno.utils.training_utils import validateOperator
 
+from muno.layers.channel_wise_conv import FactorizedDimensionSpectralConv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -125,6 +127,33 @@ MODEL_REGISTRY = {
             },
         ],
     },
+    "adapted_fno_factorized": {
+        "kind": "adapter_core_adapter",
+        "model": [_post_lift_mamba_lifting, FNO, ChannelMLP],
+        "params": [
+            {
+                "width": 20,
+                "use_mamba_kwargs": None,
+                "mamba_fallback_kernel": 9,
+                "padding": 0,
+                "n_dim": 3,
+                "non_linearity": torch.nn.functional.gelu,
+            },
+            {
+                "hidden_channels": 20,
+                "n_layers": 4,
+                "n_modes": {"t": 10, "x": 32},  # [10, 40, 40],
+                "disable_lifting_and_projection": True,
+                "conv_module": FactorizedDimensionSpectralConv
+            },
+            {
+                "hidden_channels": 20,
+                "n_layers": 2,
+                "n_dim": 3,
+                "non_linearity": torch.nn.functional.gelu,
+            },
+        ],
+    },
     "adapted_fno_no_mamba": {
         "kind": "adapter_core_adapter",
         "model": [ChannelMLP, FNO, ChannelMLP],
@@ -140,6 +169,31 @@ MODEL_REGISTRY = {
                 "n_layers": 4,
                 "n_modes": [20, 42, 42],
                 "disable_lifting_and_projection": True,
+            },
+            {
+                "hidden_channels": 32,
+                "n_layers": 2,
+                "n_dim": 3,
+                "non_linearity": torch.nn.functional.gelu,
+            },
+        ],
+    },
+    "adapted_fno_no_mamba_factorized": {
+        "kind": "adapter_core_adapter",
+        "model": [ChannelMLP, FNO, ChannelMLP],
+        "params": [
+            {
+                "hidden_channels": 32,
+                "n_layers": 2,
+                "n_dim": 3,
+                "non_linearity": torch.nn.functional.gelu,
+            },
+            {
+                "hidden_channels": 32,
+                "n_layers": 4,
+                "n_modes": {"t": 10, "x": 32},  # [20, 42, 42],
+                "disable_lifting_and_projection": True,
+                "conv_module": FactorizedDimensionSpectralConv
             },
             {
                 "hidden_channels": 32,
@@ -249,14 +303,17 @@ def _resolve_model_config(model_config):
 
 
 def get_all_files(dir: str, file_type: str = '.pt'):
-    return glob.glob(dir + "/*" + file_type)
+    return sorted(glob.glob(dir + "/*" + file_type))
 
 
-def load_from_dir(dir: str, SAVE_LOAD_ARGS = None):
-    files = get_all_files(dir) # glob.glob(dir + "/*.pt")
+def load_from_dir(dir: str, SAVE_LOAD_ARGS=None):
+    if SAVE_LOAD_ARGS is None:
+        SAVE_LOAD_ARGS = {}
+
+    files = get_all_files(dir)
     print('loading from {}'.format(files))
     return [torch.load(file, pickle_module=dill, **SAVE_LOAD_ARGS) for file in files]
-   
+
 
 def build_model(loader_channels, model_config,
                 pretr_core: torch.nn.Module = None,
@@ -333,7 +390,7 @@ def build_model(loader_channels, model_config,
             assert len(pretr_liftings) == len(pretr_projections), 'Incosistent lengths of liftings and projections.'
             assert len(pretr_liftings) == len(liftings), 'Number of passed liftings does not match the problem.'
 
-            for ad_idx in enumerate(liftings):
+            for ad_idx, _ in enumerate(liftings):
                 if liftings[ad_idx].state_dict().keys() != pretr_liftings[ad_idx].state_dict().keys():
                     warnings.warn(f'Parameter dict of pretr. lifting {ad_idx} does not match the one, set in config. \
                                     Defaulting to the passed one.')
@@ -358,8 +415,6 @@ def build_model(loader_channels, model_config,
                                         Defaulting to the passed one, despite matching state_dict keys.')
                         projections[ad_idx] = pretr_projections[ad_idx]
 
-                
-
         current_core_params = _filter_init_params(core_cls, core_params)
         core = core_cls(
             in_channels=hidden_channels,
@@ -368,18 +423,17 @@ def build_model(loader_channels, model_config,
         )
 
         if pretr_core is not None:
-                if core.state_dict().keys() != pretr_core.state_dict().keys():
-                    warnings.warn(f'Parameter dict of the passed pretrained core does not match the one, set in config. \
+            if core.state_dict().keys() != pretr_core.state_dict().keys():
+                warnings.warn(f'Parameter dict of the passed pretrained core does not match the one, set in config. \
                                     Defaulting to the passed one.')
-                    core = pretr_core
-                else:
-                    try:
-                        core.load_state_dict(pretr_core.state_dict())
-                    except:
-                        warnings.warn(f'Parameter dict of the passed pretrained core does not match the one, set in config. \
+                core = pretr_core
+            else:
+                try:
+                    core.load_state_dict(pretr_core.state_dict())
+                except:
+                    warnings.warn(f'Parameter dict of the passed pretrained core does not match the one, set in config. \
                                         Defaulting to the passed one, despite matching state_dict keys.')
-                        core = pretr_core
-
+                    core = pretr_core
 
         return liftings, core, projections
 
@@ -387,7 +441,7 @@ def build_model(loader_channels, model_config,
 
 
 def passModelToDevice(model: Union[torch.nn.Module, torch.nn.DataParallel, tuple], device: str = 'cuda') \
-    -> Union[torch.nn.Module, torch.nn.DataParallel, tuple]:
+        -> Union[torch.nn.Module, torch.nn.DataParallel, tuple]:
     if isinstance(model, (torch.nn.Module, torch.nn.DataParallel)):
         model.to(device)
     else:
@@ -404,7 +458,13 @@ def passModelToDevice(model: Union[torch.nn.Module, torch.nn.DataParallel, tuple
     return model
 
 
-# def modelToDefaultParallel(model: torch.nn.Module, devices: Union[int, List[int]] = []) -> torch.nn.Module:
+def addSkips(model: torch.nn.Module, skips_pattern):
+    skips = skips_pattern.create_skips(model)
+    model.addSkips(skips)
+
+# def modelToDefaultParallel(model: torch.nn.Module,
+#
+#  devices: Union[int, List[int]] = []) -> torch.nn.Module:
 #     if isinstance(devices, (list, tuple)) and len(devices) == 0:
 #         if torch.cuda.is_available():
 #             passModelToDevice(model, 'cuda')
@@ -425,7 +485,7 @@ def passModelToDevice(model: Union[torch.nn.Module, torch.nn.DataParallel, tuple
 #             model[2][idx].to(device)
 
 #         model = (adapters, core, projections)
-         
+
 #     passModelToDevice(model, device=devices) if isinstance(devices, int) else passModelToDevice(model, device=devices[0])
-    
+
 #     return model

@@ -1,0 +1,64 @@
+Если ты сейчас в:
+/workspace
+
+то сначала посмотреть runs:
+ls -lah /workspace/runs
+
+Найти последний run:
+ls -lah /workspace/runs | tail
+
+Или удобнее отсортировать по времени:
+ls -lt /workspace/runs
+
+Зайти в нужную папку:
+cd /workspace/runs/pdebench_multiphysics_20260723_174114
+
+Посмотреть содержимое:
+ls -lah
+
+Обычно там будет:
+run_metadata.json
+logs/
+normalizers/
+checkpoints/
+
+Посмотреть metadata:
+cat run_metadata.json
+
+Посмотреть лог обучения:
+cat logs/train.log
+
+Или последние строки:
+tail -n 50 logs/train.log
+
+Следить за логом во время обучения:
+tail -f logs/train.log
+
+Посмотреть checkpoints:
+ls -lah checkpoints
+
+Посмотреть normalizers:
+ls -lah normalizers
+
+Если не помнишь имя run:
+find /workspace/runs -maxdepth 2 -type f -name "run_metadata.json"
+
+Найти все train logs:
+find /workspace/runs -maxdepth 3 -type f -name "train.log"
+
+Последний созданный train.log:
+find /workspace/runs -type f -name "train.log" -printf "%T@ %p\n" | sort -n | tail -1
+
+Если хочешь сразу посмотреть последний лог:
+tail -n 50 $(find /workspace/runs -type f -name "train.log" -printf "%T@ %p\n" | sort -n | tail -1 | cut -d' ' -f2-)
+
+Для твоего скрина там написано:
+output_dir: /workspace/runs/pdebench_multiphysics_20260723_174114
+
+Значит команды:
+cd /workspace/runs/pdebench_multiphysics_20260723_174114
+ls -lah
+cat run_metadata.json
+tail -n 100 logs/train.log
+ls -lah checkpoints
+ls -lah normalizers

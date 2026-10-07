@@ -148,7 +148,7 @@ def main():
     trainer.setLogger(filename=str(log_path))
     trainer.buildModel(model)
 
-    trainer.save_paths = (
+    trainer._save_paths = (
         [
             str(backup_dir / f"lift_{idx}.pt")
             for idx in range(len(train_loaders))

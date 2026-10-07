@@ -1,0 +1,196 @@
+output:
+  root: D:/FoundNO_test_runs
+seed:
+  value: 42
+  deterministic: false
+inspections:
+  enabled: true
+tasks:
+- name: poseidon_ce_rp
+  source:
+    location: huggingface
+    format: concat_netcdf
+    repo_id: camlab-ethz/CE-RP
+    cache_dir: D:/datasets_cache/Poseidon/CE-RP/hf_cache
+    variable_name: data
+    sample_dim: sample
+    file_selection:
+      max_files: 1
+      strategy: first
+    files:
+    - filename: data_0.nc
+    - filename: data_1.nc
+    - filename: data_2.nc
+    - filename: data_3.nc
+    - filename: data_4.nc
+    - filename: data_5.nc
+    - filename: data_6.nc
+    - filename: data_7.nc
+    - filename: data_8.nc
+    - filename: data_9.nc
+    - filename: data_10.nc
+    - filename: data_11.nc
+    - filename: data_12.nc
+    - filename: data_13.nc
+  adapter:
+    type: temporal
+    variable_name: null
+    data_order: TCHW
+    temporal_mode: window
+    input_time_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    output_time_indices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    flatten_time_to_channels: true
+    benchmark_name: Poseidon
+    window_start_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    physics_name: ce_rp
+    input_channel_indices: [0, 1, 2, 3, 4]
+    output_channel_indices: [0, 1, 2, 3, 4]
+  split:
+    type: ratios
+    train: 0.8
+    val: 0.1
+    test: 0.1
+  loaders:
+    train:
+      batch_size: 2
+      num_workers: 0
+      pin_memory: false
+      shuffle: true
+      drop_last: true
+    val:
+      batch_size: 2
+      num_workers: 0
+      pin_memory: false
+      shuffle: false
+      drop_last: false
+    test:
+      batch_size: 2
+      num_workers: 0
+      pin_memory: false
+      shuffle: false
+      drop_last: false
+  max_samples_per_split:
+    train: 32
+    val: 8
+    test: 8
+- name: poseidon_ns_sines
+  source:
+    location: huggingface
+    format: concat_netcdf
+    repo_id: camlab-ethz/NS-Sines
+    cache_dir: D:/datasets_cache/Poseidon/NS-Sines/hf_cache
+    variable_name: velocity
+    sample_dim: sample
+    file_selection:
+      max_files: 1
+      strategy: first
+    files:
+    - filename: velocity_0.nc
+    - filename: velocity_1.nc
+    - filename: velocity_2.nc
+    - filename: velocity_3.nc
+    - filename: velocity_4.nc
+    - filename: velocity_5.nc
+    - filename: velocity_6.nc
+    - filename: velocity_7.nc
+    - filename: velocity_8.nc
+    - filename: velocity_9.nc
+    - filename: velocity_10.nc
+    - filename: velocity_11.nc
+    - filename: velocity_12.nc
+    - filename: velocity_13.nc
+    - filename: velocity_14.nc
+    - filename: velocity_15.nc
+    - filename: velocity_16.nc
+  adapter:
+    type: temporal
+    variable_name: null
+    data_order: TCHW
+    temporal_mode: window
+    input_time_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    output_time_indices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    flatten_time_to_channels: true
+    benchmark_name: Poseidon
+    window_start_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    physics_name: ns_sines
+    input_channel_indices: [0, 1, 2]
+    output_channel_indices: [0, 1, 2]
+  split:
+    type: ratios
+    train: 0.8
+    val: 0.1
+    test: 0.1
+  loaders:
+    train:
+      batch_size: 2
+      num_workers: 0
+      pin_memory: false
+      shuffle: true
+      drop_last: true
+    val:
+      batch_size: 2
+      num_workers: 0
+      pin_memory: false
+      shuffle: false
+      drop_last: false
+    test:
+      batch_size: 2
+      num_workers: 0
+      pin_memory: false
+      shuffle: false
+      drop_last: false
+  max_samples_per_split:
+    train: 32
+    val: 8
+    test: 8
+normalization:
+  enabled: true
+  normalize_x: true
+  normalize_y: true
+  device: cuda
+  max_fit_batches: 1
+model:
+  type: adapted_fno_no_mamba
+  n_dim: 2
+  hidden_channels: 16
+  lifting_layers: 1
+  projection_layers: 1
+  core_layers: 2
+  n_modes: [8, 8]
+training:
+  epochs: 1
+  device: cuda
+  train_main_fno: true
+  optimizer:
+    optimizer: adamw
+    lr: 0.001
+    weight_decay: 1.0e-05
+  scheduler:
+    scheduler: reducelr
+    patience: 2
+    factor: 0.5
+    min_lr: 1.0e-06
+evaluation:
+  after_training: true
+metrics:
+  names:
+  - mse
+  - mae
+  - rmse
+  - nrmse
+  - vrmse
+  - relative_l2
+  - balanced_relative_l2
+  - nmae_range
+  - r2_score
+  - mean_linf_error
+  - max_linf_error
+  physical:
+  - name: spectral_mse
+    tasks: all
+  - name: spectral_nrmse
+    tasks: all
+  - name: band_spectral_mse_2d
+    tasks: all
+  - name: band_spectral_nrmse_2d
+    tasks: all

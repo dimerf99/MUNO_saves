@@ -105,7 +105,7 @@ class FineTuner(object):
         self.params_to_optimize = [{'params': self.model.parameters()},]
 
     @buildModel.register
-    def _(self, model: tuple): #expect Tuple[List[torch.nn.Module], torch.nn.Module, List[torch.nn.Module]]
+    def _(self, model: tuple): # expect Tuple[List[torch.nn.Module], torch.nn.Module, List[torch.nn.Module]]
         assert len(model) == 3, \
             'Multiple adapter architecture requires sequence of input adapters -> single model -> output adapters'
 
@@ -331,7 +331,6 @@ class FineTuner(object):
         else:
             self.scheduler.step()
 
-        
         lr = None
         for pg in self.optimizer.param_groups:
             lr = pg["lr"]
@@ -345,7 +344,7 @@ class FineTuner(object):
             self.main_fno.eval()
 
         with torch.no_grad():
-            val_loss = 0.
+            val_loss = 0.0
 
             n_fine_samples = self.n_samples_val
 
@@ -385,13 +384,13 @@ class FineTuner(object):
 
     def onEpochStart(self, *args, **kwargs):
         """
-        Stub for implementing additional logick!
+        Stub for implementing additional logic!
         """
         pass
 
     def onEpochEnd(self, *args, **kwargs):
         """
-        Stub for implementing additional logick!
+        Stub for implementing additional logic!
         """
         if kwargs['val_loss'] < self._min_val_err:
             self._min_val_err = kwargs['val_loss']
@@ -432,7 +431,8 @@ class FineTuner(object):
         loss: float | Tensor
             float value of training loss
         """
-        HEATMAPS = False; HMP_idx = 5
+        HEATMAPS = False;
+        HMP_idx = 5
 
         sample["x"] = sample["x"].to(self.device)
         sample["y"] = sample["y"].to(self.device)
@@ -442,10 +442,12 @@ class FineTuner(object):
         if idx == HMP_idx and HEATMAPS:    
             print(f'sample.shape is {sample["x"].shape} - {sample["y"].shape}')
             for channel in range(sample['x'].shape[1]):
-                Heatmap(sample['x'][0, channel, -5, ...].cpu().detach().numpy(), title=f'Input: channel {channel} before preprocess')
+                Heatmap(sample['x'][0, channel, -5, ...].cpu().detach().numpy(),
+                        title=f'Input: channel {channel} before preprocess')
 
             for channel in range(sample['y'].shape[1]):
-                Heatmap(sample['y'][0, channel, -5, ...].cpu().detach().numpy(), title=f'Reference: channel {channel} before preprocess')
+                Heatmap(sample['y'][0, channel, -5, ...].cpu().detach().numpy(),
+                        title=f'Reference: channel {channel} before preprocess')
 
         if data_processor is not None:
             if isinstance(sample, dict):
@@ -456,11 +458,12 @@ class FineTuner(object):
         if idx == HMP_idx and HEATMAPS:    
             print(f'sample.shape is {sample["x"].shape} - {sample["y"].shape}')
             for channel in range(sample['x'].shape[1]):
-                Heatmap(sample['x'][0, channel, -5, ...].cpu().detach().numpy(), title=f'Input: channel {channel}')
+                Heatmap(sample['x'][0, channel, -5, ...].cpu().detach().numpy(),
+                        title=f'Input: channel {channel}')
 
             for channel in range(sample['y'].shape[1]):
-                Heatmap(sample['y'][0, channel, -5, ...].cpu().detach().numpy(), title=f'Reference: channel {channel}')
-
+                Heatmap(sample['y'][0, channel, -5, ...].cpu().detach().numpy(),
+                        title=f'Reference: channel {channel}')
 
         if self.mixed_precision:
             raise NotImplementedError('No mixed precision functionality implemented!')
@@ -514,5 +517,5 @@ class FineTuner(object):
         return loss
 
 
-    def finetune():
+    def finetune(self):
         pass

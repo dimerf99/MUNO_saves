@@ -17,7 +17,7 @@ from muno.models.localattn_exp import LocalAttnFNO
 from neuralop.layers.channel_mlp import ChannelMLP
 
 from muno.agents.agent import (NeuralOpSystemEnvironment, FixedMultiAgentSystem,
-                                   AbstractAgent, BasicAgent, NeuralOperatorAgent, InitialConditionsAgent) 
+                               AbstractAgent, BasicAgent, NeuralOperatorAgent, InitialConditionsAgent)
 
 
 def initAgent(ID: int, key: str, env: NeuralOpSystemEnvironment, **agent_kwargs) -> AbstractAgent:

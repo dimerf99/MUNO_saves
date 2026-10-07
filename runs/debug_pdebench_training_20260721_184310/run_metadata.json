@@ -1,0 +1,109 @@
+{
+  "config_path": "D:\\PycharmProjects\\FoundNO-main\\experiments\\configs\\pdebench_debug.yaml",
+  "task_metadata": [
+    {
+      "eq_idx": 0,
+      "source": {
+        "location": "local",
+        "format": "hdf5",
+        "path": "D:\\PDEBench_data\\debug_diff_sorp.hdf5",
+        "variable_path": "data",
+        "sample_dim": 0
+      },
+      "adapter": {
+        "type": "pdebench_temporal",
+        "variable_name": null,
+        "data_order": "TCX",
+        "input_time_indices": [
+          0,
+          1,
+          2
+        ],
+        "output_time_indices": [
+          3,
+          4
+        ],
+        "input_channel_indices": [
+          0,
+          1
+        ],
+        "output_channel_indices": [
+          0,
+          1
+        ],
+        "physics_name": "diff_sorp",
+        "ensure_2d": true
+      }
+    },
+    {
+      "eq_idx": 1,
+      "source": {
+        "location": "local",
+        "format": "hdf5",
+        "path": "D:\\PDEBench_data\\debug_darcy.hdf5",
+        "sample_dim": 0,
+        "variables": {
+          "coeff": "coeff",
+          "solution": "solution"
+        }
+      },
+      "adapter": {
+        "type": "pdebench_input_output",
+        "input_variable_name": "coeff",
+        "output_variable_name": "solution",
+        "input_order": "XY",
+        "output_order": "XY",
+        "physics_name": "darcy"
+      }
+    },
+    {
+      "eq_idx": 2,
+      "source": {
+        "location": "local",
+        "format": "hdf5",
+        "path": "D:\\PDEBench_data\\debug_swe.hdf5",
+        "variable_path": "data",
+        "sample_dim": 0
+      },
+      "adapter": {
+        "type": "pdebench_temporal",
+        "variable_name": null,
+        "data_order": "TCHW",
+        "input_time_indices": [
+          0,
+          1,
+          2
+        ],
+        "output_time_indices": [
+          3,
+          4
+        ],
+        "input_channel_indices": [
+          0,
+          1,
+          2
+        ],
+        "output_channel_indices": [
+          0,
+          1,
+          2
+        ],
+        "physics_name": "swe"
+      }
+    }
+  ],
+  "loader_channels": [
+    [
+      6,
+      4
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      9,
+      6
+    ]
+  ]
+}

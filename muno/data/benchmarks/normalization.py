@@ -51,7 +51,7 @@ def fit_multiphys_unit_gaussian_normalizer(loader, key, device='cuda', max_batch
             break
 
     normalizer.to(device)
-    return normalizer        
+    return normalizer
 
 
 def build_data_processor(train_loader,

@@ -128,7 +128,7 @@ class DefaultDataProcessor(DataProcessor):
                 data_dict = self.in_normalizer.transform(data_dict)
             if self.out_normalizer is not None and training:
                 data_dict = self.out_normalizer.transform(data_dict)
-                
+
         return data_dict
 
     def postprocess(self, output, data_dict, training):
@@ -151,7 +151,7 @@ class DefaultDataProcessor(DataProcessor):
         out, data_dict
             postprocessed outputs and data dict
         """
-        # if "x" in data_dict.keys():        
+        # if "x" in data_dict.keys():
         if self.out_normalizer and not training:
             output = self.out_normalizer.inverse_transform(output)
 
